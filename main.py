@@ -7,7 +7,7 @@ load_dotenv()
 
 # Configurações da API do BaseLinker
 BASELINKER_URL = "https://api.baselinker.com/connector.php"
-API_TOKEN = os.environ.get("API_TOKEN")  # Substitua pelo token gerado no painel
+API_TOKEN = os.environ.get("BASELINKER_TOKEN")  # Substitua pelo token gerado no painel
 
 def buscar_pedido_baselinker(external_order_id):
     """Busca um pedido na API usando o ID Externo (Marketplace/Loja)."""
