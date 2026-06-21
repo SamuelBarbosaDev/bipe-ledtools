@@ -1,29 +1,35 @@
-// server/api/scan.post.ts
-import pkg from '@prisma/client'
-const { PrismaClient } = pkg
-
-const prisma = new PrismaClient()
+import { db } from '../utils/db'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const trackingCode = body.trackingCode?.trim()
+  const scannedCode = body.trackingCode?.trim()
 
-  if (!trackingCode) {
+  if (!scannedCode) {
     throw createError({ statusCode: 400, statusMessage: 'Código não fornecido.' })
   }
 
-  // Busca rápida (usa o index do SQLite)
-  const order = await prisma.order.findFirst({
-    where: { deliveryPackageNr: trackingCode },
-    include: { products: true }
-  })
+  // A MÁGICA AQUI: O SQL usa "OR" para buscar nas duas colunas simultaneamente
+  const orderQuery = db.prepare(`
+    SELECT * FROM "Order" 
+    WHERE deliveryPackageNr = ? OR externalOrderId = ?
+  `)
+  
+  // Passamos o mesmo código duas vezes para substituir os dois "?" na query
+  const order = orderQuery.get(scannedCode, scannedCode) as any
 
   if (!order) {
-    throw createError({ statusCode: 404, statusMessage: 'Pedido não encontrado ou sem código de rastreio.' })
+    throw createError({ statusCode: 404, statusMessage: 'Pedido ou Rastreio não encontrado.' })
   }
+
+  // Busca os produtos atrelados a este pedido
+  const productsQuery = db.prepare('SELECT * FROM Product WHERE orderId = ?')
+  const products = productsQuery.all(order.id)
 
   return {
     success: true,
-    order
+    order: {
+      ...order,
+      products
+    }
   }
 })

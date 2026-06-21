@@ -1,87 +1,139 @@
 <template>
-  <div class="min-h-screen bg-gray-100 p-8 flex flex-col items-center">
-    <div class="w-full max-w-3xl bg-white shadow-lg rounded-xl p-6">
-      
-      <!-- Cabeçalho e Sincronização -->
-      <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-800">Conferência Led Tools</h1>
-        <button 
-          @click="syncOrders" 
-          :disabled="isSyncing"
-          class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium disabled:opacity-50"
-        >
-          {{ isSyncing ? 'Sincronizando...' : 'Sincronizar Baselinker' }}
-        </button>
-      </div>
-
-      <!-- Área de Bipagem -->
-      <div class="bg-blue-50 p-6 rounded-lg mb-6 border-2 border-blue-200">
-        <label class="block text-sm font-bold text-blue-800 mb-2">
-          {{ currentOrder ? 'Aguardando Bipagem do EAN do Produto' : 'Aguardando Bipagem do Rastreio da Etiqueta' }}
-        </label>
-        <input 
-          ref="scannerInputRef"
-          v-model="scannedCode"
-          @keyup.enter="handleScan"
-          type="text" 
-          autofocus
-          class="w-full text-2xl p-4 border border-gray-300 rounded shadow-inner focus:outline-none focus:ring-4 focus:ring-blue-300"
-          :placeholder="currentOrder ? 'Bipe o código de barras (EAN)...' : 'Bipe o rastreio (Ex: AMZB... ou BR26...)'"
-        />
-        <p v-if="errorMessage" class="text-red-600 font-bold mt-2">{{ errorMessage }}</p>
-        <p v-if="successMessage" class="text-green-600 font-bold mt-2">{{ successMessage }}</p>
-      </div>
-
-      <!-- Detalhes do Pedido Atual -->
-      <div v-if="currentOrder" class="mt-4">
-        <div class="flex justify-between items-center bg-gray-800 text-white p-3 rounded-t-lg">
-          <h2 class="font-bold">Pedido: {{ currentOrder.id }}</h2>
-          <button @click="resetConference" class="text-sm bg-red-600 hover:bg-red-500 px-3 py-1 rounded">Cancelar Conferência</button>
-        </div>
-        
-        <table class="w-full border-collapse border border-gray-300">
-          <thead>
-            <tr class="bg-gray-200">
-              <th class="border p-2 text-left">Produto</th>
-              <th class="border p-2 text-center">EAN Esperado</th>
-              <th class="border p-2 text-center">Qtd</th>
-              <th class="border p-2 text-center">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="product in currentOrder.products" :key="product.id" :class="{'bg-green-100': product.checked}">
-              <td class="border p-2 text-sm">{{ product.name }}</td>
-              <td class="border p-2 text-center font-mono text-sm">{{ product.ean || 'N/A' }}</td>
-              <td class="border p-2 text-center">{{ product.quantity }}</td>
-              <td class="border p-2 text-center">
-                <span v-if="product.checked" class="text-green-600 font-bold">✓ Conferido</span>
-                <span v-else class="text-orange-500 font-bold">Pendente</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-    </div>
+  <div class="layout" :class="{ 'error-mode': errorMessage }">
     
-    <!-- Áudio de erro invisível -->
+    <header class="header">
+      <img src="/let-tools.jpg" alt="Led Tools" class="logo" /> 
+      <div class="user-info">
+        <span class="user-role">Conferência</span>
+        <img src="/mascote.png" alt="Mascote" class="mascote" />
+      </div>
+    </header>
+
+    <main class="main-container">
+      
+      <button class="btn-primary" @click="syncOrders" :disabled="isSyncing" style="margin-bottom: 2rem;">
+        {{ isSyncing ? 'Sincronizando com BaseLinker...' : 'Sincronizar Pedidos' }}
+      </button>
+
+      <div v-if="successMessage && isOrderComplete" class="card success-card">
+        <h2>Caixa Fechada!</h2>
+        <p>{{ successMessage }}</p>
+      </div>
+
+      <div class="card search-card" :class="{ 'ean-card': currentOrder }" v-show="!isOrderComplete">
+        <h1>{{ currentOrder ? 'Bipar Produto (EAN)' : 'Bipar Etiqueta' }}</h1>
+        <div class="input-group">
+          <input 
+            ref="scannerInputRef"
+            v-model="scannedCode"
+            @keyup.enter="handleScan"
+            type="text" 
+            autofocus
+            class="large-input"
+            :class="{ 'ean-input': currentOrder }"
+            :placeholder="currentOrder ? 'Bipe o EAN do produto...' : 'ID do Pedido ou Rastreio...'"
+          />
+          <p v-if="errorMessage" class="error-msg">{{ errorMessage }}</p>
+          <p v-if="successMessage && !isOrderComplete" style="color: var(--success-color); font-weight: bold; margin-top: 1rem;">
+            {{ successMessage }}
+          </p>
+        </div>
+      </div>
+
+      <div v-if="currentOrder">
+        
+        <div class="card info-card">
+          <div class="info-block">
+            <span class="label">Pedido</span>
+            <span class="value">{{ currentOrder.externalOrderId || currentOrder.id }}</span>
+          </div>
+          <div class="info-block right">
+            <span class="label">Rastreio</span>
+            <span class="value" style="font-size: 1rem;">{{ currentOrder.deliveryPackageNr || 'Sem rastreio' }}</span>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <button @click="resetConference" style="background: var(--error-bg); color: white; padding: 0.5rem 1.5rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+            Cancelar Conferência
+          </button>
+        </div>
+
+        <div class="progress-container">
+          <div class="progress-header">
+            <span>Progresso da Caixa</span>
+            <span>{{ totalScanned }} / {{ totalRequired }}</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" :style="{ width: progressPercentage + '%' }"></div>
+          </div>
+        </div>
+
+        <div class="product-list">
+          <div 
+            v-for="product in currentOrder.products" 
+            :key="product.id" 
+            class="product-card" 
+            :class="{ 'product-done': product.checked }"
+          >
+            <div class="product-details">
+              <div class="product-sku">{{ product.sku || 'SEM SKU' }}</div>
+              <div class="product-name">{{ product.name }}</div>
+              <div class="product-ean">{{ product.ean || 'EAN não cadastrado' }}</div>
+            </div>
+            <div class="product-qty">
+              <span class="qty-label">Qtd</span>
+              <div class="qty-numbers">
+                <span class="qty-current">{{ product.currentQty }}</span>
+                <span class="qty-divider">/</span>
+                <span class="qty-total">{{ product.quantity }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+    
     <audio ref="errorAudioRef" src="/alert.mp3"></audio>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+// 1. Adicione o 'watch' na importação do vue
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 
+// ... suas importações de css ...
+import '~/assets/css/main.css'
+import '~/assets/css/index.css'
+
+// ... suas variáveis (refs) ...
 const scannerInputRef = ref(null)
 const errorAudioRef = ref(null)
-
 const scannedCode = ref('')
 const currentOrder = ref(null)
 const errorMessage = ref('')
 const successMessage = ref('')
 const isSyncing = ref(false)
 
-// Mantém o foco no input sempre que a página for clicada (útil para o operador)
+// 2. Crie a variável para o temporizador
+let scanTimeout = null
+
+// 3. Adicione o observador (Auto Submit)
+watch(scannedCode, (newVal) => {
+  // Se o campo estiver vazio, não faz nada
+  if (!newVal || newVal.trim() === '') return
+
+  // Limpa a contagem anterior enquanto os caracteres estiverem entrando rápido
+  clearTimeout(scanTimeout)
+
+  // Inicia a contagem. 200ms de pausa significa que o leitor terminou de "digitar"
+  scanTimeout = setTimeout(() => {
+    handleScan()
+  }, 1000)
+})
+
+// Mantém o foco no input
 onMounted(() => {
   document.addEventListener('click', () => {
     scannerInputRef.value?.focus()
@@ -95,6 +147,26 @@ const playErrorSound = () => {
   }
 }
 
+// Lógica de progresso da caixa
+const totalRequired = computed(() => {
+  if (!currentOrder.value) return 0
+  return currentOrder.value.products.reduce((acc, p) => acc + p.quantity, 0)
+})
+
+const totalScanned = computed(() => {
+  if (!currentOrder.value) return 0
+  return currentOrder.value.products.reduce((acc, p) => acc + p.currentQty, 0)
+})
+
+const progressPercentage = computed(() => {
+  if (totalRequired.value === 0) return 0
+  return (totalScanned.value / totalRequired.value) * 100
+})
+
+const isOrderComplete = computed(() => {
+  return totalRequired.value > 0 && totalScanned.value === totalRequired.value
+})
+
 const syncOrders = async () => {
   isSyncing.value = true
   errorMessage.value = ''
@@ -103,7 +175,7 @@ const syncOrders = async () => {
     const res = await $fetch('/api/baselinker', { method: 'POST' })
     successMessage.value = res.message
   } catch (error) {
-    errorMessage.value = 'Erro ao sincronizar dados.'
+    errorMessage.value = 'Erro ao sincronizar dados do BaseLinker.'
     playErrorSound()
   } finally {
     isSyncing.value = false
@@ -113,13 +185,13 @@ const syncOrders = async () => {
 
 const handleScan = async () => {
   const code = scannedCode.value.trim()
-  scannedCode.value = '' // Limpa o input rapidamente
+  scannedCode.value = '' 
   errorMessage.value = ''
   successMessage.value = ''
 
   if (!code) return
 
-  // CENÁRIO 1: Procurando um pedido (Bipando Rastreio)
+  // CENÁRIO 1: Procurando Pedido (Busca Rastreio OU ID Externo)
   if (!currentOrder.value) {
     try {
       const response = await $fetch('/api/scan', {
@@ -127,57 +199,71 @@ const handleScan = async () => {
         body: { trackingCode: code }
       })
       
-      // Adiciona flag visual de 'checked'
       const orderData = response.order
-      orderData.products = orderData.products.map(p => ({ ...p, checked: false }))
+      // Inicializa a quantidade atual e a flag de checado
+      orderData.products = orderData.products.map(p => ({ 
+        ...p, 
+        currentQty: 0,
+        checked: false 
+      }))
       
       currentOrder.value = orderData
-      successMessage.value = 'Pedido encontrado! Bipe os produtos.'
+      successMessage.value = 'Pedido encontrado! Inicie a bipagem.'
     } catch (error) {
       playErrorSound()
-      errorMessage.value = error.data?.statusMessage || 'Etiqueta não encontrada no banco local.'
+      errorMessage.value = 'Etiqueta ou Pedido não encontrado no banco local.'
     }
   } 
-  // CENÁRIO 2: Conferindo Produto (Bipando EAN)
+  // CENÁRIO 2: Conferindo Produtos (EAN)
   else {
     let productFound = false
-    let allChecked = true
 
     for (const product of currentOrder.value.products) {
-      if (product.ean === code && !product.checked) {
-        product.checked = true
+      // Verifica se o EAN bate e se ainda precisa bipar mais unidades desse item
+      if (product.ean === code && product.currentQty < product.quantity) {
+        product.currentQty += 1
+        
+        if (product.currentQty === product.quantity) {
+          product.checked = true
+        }
+        
         productFound = true
-        successMessage.value = 'Produto conferido com sucesso!'
-        break // Sai do loop para marcar 1 quantidade por vez
+        successMessage.value = 'Produto conferido!'
+        break // Sai para contabilizar 1 por vez
       }
     }
 
     if (!productFound) {
       playErrorSound()
-      errorMessage.value = 'EAN não pertence a este pedido ou já foi conferido!'
+      // Verifica se o EAN existe, mas já foi bipado o limite
+      const overLimit = currentOrder.value.products.some(p => p.ean === code && p.currentQty >= p.quantity)
+      if (overLimit) {
+        errorMessage.value = 'Quantidade máxima deste produto já atingida!'
+      } else {
+        errorMessage.value = 'EAN inválido ou não pertence a este pedido!'
+      }
       return
     }
 
-    // Verifica se a caixa toda foi conferida
-    currentOrder.value.products.forEach(p => {
-      if (!p.checked) allChecked = false
-    })
-
-    if (allChecked) {
+    if (isOrderComplete.value) {
       successMessage.value = 'PEDIDO 100% CONFERIDO! Fechando caixa...'
-      // Timeout curto para o operador ver a mensagem de sucesso antes de resetar
       setTimeout(() => {
         resetConference()
-      }, 2000)
+      }, 3000)
     }
   }
 }
 
-const resetConference = () => {
+const resetConference = async () => {
   currentOrder.value = null
   scannedCode.value = ''
   errorMessage.value = ''
   successMessage.value = ''
+  
+  // Aguarda o Vue re-renderizar a tela (voltar para o modo 'Etiqueta')
+  await nextTick() 
+  
+  // Agora sim, foca no input com segurança
   scannerInputRef.value?.focus()
 }
 </script>
