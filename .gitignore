@@ -26,3 +26,5 @@ logs
 # Other
 venv
 rascunho.md
+
+/generated/prisma

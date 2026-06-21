@@ -1,235 +1,183 @@
-<script setup lang="ts">
-import { ref, nextTick, computed, onMounted } from 'vue'
-
-// --- ESTADOS ---
-const inputPedido = ref('')
-const inputEan = ref('')
-const pedidoData = ref<any>(null)
-const listaConferencia = ref<Record<string, any>>({})
-const errorMsg = ref('')
-const hasErrorAlert = ref(false)
-const conferenciaConcluida = ref(false)
-
-// --- REFS PARA AUTO-FOCUS ---
-const refInputPedido = ref<HTMLInputElement | null>(null)
-const refInputEan = ref<HTMLInputElement | null>(null)
-
-// Força o foco assim que a tela abre
-onMounted(async () => {
-  await nextTick()
-  refInputPedido.value?.focus()
-})
-
-// --- LÓGICA DE BUSCA DO PEDIDO ---
-const buscarPedido = async () => {
-  if (!inputPedido.value.trim()) return
-  
-  errorMsg.value = ''
-  pedidoData.value = null
-  listaConferencia.value = {}
-  conferenciaConcluida.value = false
-
-  // Chamada à nossa API segura
-  const { data } = await useFetch('/api/baselinker', {
-    method: 'POST',
-    body: { externalOrderId: inputPedido.value.trim() }
-  })
-
-  // Validação
-  if (data.value?.success) {
-    pedidoData.value = data.value.order
-    montarMapaDeConferencia(pedidoData.value.products)
-    
-    // Foca no EAN após carregar a tela do pedido
-    await nextTick()
-    refInputEan.value?.focus()
-  } else {
-    dispararAlerta()
-    errorMsg.value = 'Pedido não encontrado. Verifique se o número está correto.'
-    inputPedido.value = ''
-    await nextTick()
-    refInputPedido.value?.focus()
-  }
-}
-
-// --- MONTA MAPA DE CONFERÊNCIA ---
-const montarMapaDeConferencia = (produtos: any[]) => {
-  produtos.forEach(produto => {
-    const chave = produto.ean?.trim() || produto.sku?.trim()
-    if (!chave) return
-
-    if (listaConferencia.value[chave]) {
-      listaConferencia.value[chave].total += produto.quantity
-    } else {
-      listaConferencia.value[chave] = {
-        nome: produto.name,
-        sku: produto.sku,
-        total: produto.quantity,
-        conferido: 0
-      }
-    }
-  })
-}
-
-// --- COMPUTEDS ---
-const itensPendentes = computed(() => {
-  return Object.values(listaConferencia.value).filter(i => i.conferido < i.total)
-})
-
-const progressoGeral = computed(() => {
-  const itens = Object.values(listaConferencia.value)
-  if (!itens.length) return 0
-  const total = itens.reduce((acc, curr) => acc + curr.total, 0)
-  const conferido = itens.reduce((acc, curr) => acc + curr.conferido, 0)
-  return Math.round((conferido / total) * 100)
-})
-
-// --- LÓGICA DE BIPE DE EAN ---
-const conferirEan = async () => {
-  const bipado = inputEan.value.trim().toUpperCase()
-  inputEan.value = '' // Limpa imediatamente
-
-  if (!bipado) return
-
-  const item = listaConferencia.value[bipado]
-
-  if (item && item.conferido < item.total) {
-    hasErrorAlert.value = false
-    item.conferido += 1
-    
-    // VERIFICA SE FINALIZOU TUDO
-    if (itensPendentes.value.length === 0) {
-      conferenciaConcluida.value = true
-      
-      // Espera 1,5 segundos e reinicia o fluxo
-      setTimeout(async () => {
-        inputPedido.value = ''
-        pedidoData.value = null
-        listaConferencia.value = {}
-        conferenciaConcluida.value = false
-        
-        // Foca novamente na busca do pedido
-        await nextTick()
-        refInputPedido.value?.focus()
-      }, 900)
-    }
-  } else {
-    dispararAlerta()
-  }
-}
-
-// --- ALERTA VISUAL E SONORO ---
-const dispararAlerta = () => {
-  hasErrorAlert.value = true
-  const audio = new Audio('/alert.mp3') 
-  audio.play().catch(e => console.log('Áudio bloqueado', e))
-  
-  setTimeout(() => {
-    hasErrorAlert.value = false
-  }, 1500)
-}
-</script>
-
 <template>
-  <div class="layout" :class="{ 'error-mode': hasErrorAlert }">
-    
-    <header class="header">
-      <img src="/let-tools.jpg" alt="Led.Tools" class="logo" />
-      <div class="user-info">
-        <span class="user-role">Operação Logística</span>
-        <img src="/mascote.png" alt="Mascote" class="mascote" />
-      </div>
-    </header>
-
-    <main class="main-container">
+  <div class="min-h-screen bg-gray-100 p-8 flex flex-col items-center">
+    <div class="w-full max-w-3xl bg-white shadow-lg rounded-xl p-6">
       
-      <div v-if="conferenciaConcluida" class="card success-card">
-        <h2>🎉 Pedido Conferido com Sucesso!</h2>
-        <p>Preparando próximo pedido...</p>
+      <!-- Cabeçalho e Sincronização -->
+      <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Conferência Led Tools</h1>
+        <button 
+          @click="syncOrders" 
+          :disabled="isSyncing"
+          class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium disabled:opacity-50"
+        >
+          {{ isSyncing ? 'Sincronizando...' : 'Sincronizar Baselinker' }}
+        </button>
       </div>
 
-      <div v-if="!pedidoData && !conferenciaConcluida" class="card search-card">
-        <h1>Conferência de Pedidos</h1>
+      <!-- Área de Bipagem -->
+      <div class="bg-blue-50 p-6 rounded-lg mb-6 border-2 border-blue-200">
+        <label class="block text-sm font-bold text-blue-800 mb-2">
+          {{ currentOrder ? 'Aguardando Bipagem do EAN do Produto' : 'Aguardando Bipagem do Rastreio da Etiqueta' }}
+        </label>
+        <input 
+          ref="scannerInputRef"
+          v-model="scannedCode"
+          @keyup.enter="handleScan"
+          type="text" 
+          autofocus
+          class="w-full text-2xl p-4 border border-gray-300 rounded shadow-inner focus:outline-none focus:ring-4 focus:ring-blue-300"
+          :placeholder="currentOrder ? 'Bipe o código de barras (EAN)...' : 'Bipe o rastreio (Ex: AMZB... ou BR26...)'"
+        />
+        <p v-if="errorMessage" class="text-red-600 font-bold mt-2">{{ errorMessage }}</p>
+        <p v-if="successMessage" class="text-green-600 font-bold mt-2">{{ successMessage }}</p>
+      </div>
+
+      <!-- Detalhes do Pedido Atual -->
+      <div v-if="currentOrder" class="mt-4">
+        <div class="flex justify-between items-center bg-gray-800 text-white p-3 rounded-t-lg">
+          <h2 class="font-bold">Pedido: {{ currentOrder.id }}</h2>
+          <button @click="resetConference" class="text-sm bg-red-600 hover:bg-red-500 px-3 py-1 rounded">Cancelar Conferência</button>
+        </div>
         
-        <div class="input-group">
-          <input 
-            ref="refInputPedido"
-            v-model="inputPedido"
-            @keyup.enter="buscarPedido"
-            type="text" 
-            autofocus
-            placeholder="Bipe ou digite o número do pedido..."
-            class="large-input"
-          />
-          <button @click="buscarPedido" class="btn-primary">
-            Buscar Pedido
-          </button>
-          
-          <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
-        </div>
+        <table class="w-full border-collapse border border-gray-300">
+          <thead>
+            <tr class="bg-gray-200">
+              <th class="border p-2 text-left">Produto</th>
+              <th class="border p-2 text-center">EAN Esperado</th>
+              <th class="border p-2 text-center">Qtd</th>
+              <th class="border p-2 text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="product in currentOrder.products" :key="product.id" :class="{'bg-green-100': product.checked}">
+              <td class="border p-2 text-sm">{{ product.name }}</td>
+              <td class="border p-2 text-center font-mono text-sm">{{ product.ean || 'N/A' }}</td>
+              <td class="border p-2 text-center">{{ product.quantity }}</td>
+              <td class="border p-2 text-center">
+                <span v-if="product.checked" class="text-green-600 font-bold">✓ Conferido</span>
+                <span v-else class="text-orange-500 font-bold">Pendente</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div v-if="pedidoData && !conferenciaConcluida">
-        
-        <div class="card info-card">
-          <div class="info-block">
-            <span class="label">Pedido</span>
-            <span class="value">{{ pedidoData.external_order_id }}</span>
-          </div>
-          <div class="info-block right">
-            <span class="label">Cliente</span>
-            <span class="value">{{ pedidoData.delivery_fullname }}</span>
-          </div>
-        </div>
-
-        <div class="progress-container">
-          <div class="progress-header">
-            <span>Progresso</span>
-            <span>{{ progressoGeral }}%</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" :style="{ width: progressoGeral + '%' }"></div>
-          </div>
-        </div>
-
-        <div class="card ean-card">
-          <label class="label">Pronto para bipar produtos</label>
-          <input 
-            ref="refInputEan"
-            v-model="inputEan"
-            @keyup.enter="conferirEan"
-            type="text" 
-            placeholder="Bipe o EAN do produto..."
-            class="large-input ean-input"
-          />
-        </div>
-
-        <div class="product-list">
-          <div 
-            v-for="(item, key) in listaConferencia" :key="key"
-            class="product-card"
-            :class="{ 'product-done': item.conferido === item.total }"
-          >
-            <div class="product-details">
-              <h3 class="product-sku">{{ item.sku }}</h3>
-              <p class="product-name">{{ item.nome }}</p>
-              <p class="product-ean">EAN: {{ key }}</p>
-            </div>
-            
-            <div class="product-qty">
-              <span class="qty-label">QTD</span>
-              <div class="qty-numbers">
-                <span class="qty-current">{{ item.conferido }}</span>
-                <span class="qty-divider">/</span>
-                <span class="qty-total">{{ item.total }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-    </main>
+    </div>
+    
+    <!-- Áudio de erro invisível -->
+    <audio ref="errorAudioRef" src="/alert.mp3"></audio>
   </div>
 </template>
 
-<style scoped src="~/assets/css/index.css"></style>
+<script setup>
+import { ref, onMounted } from 'vue'
+
+const scannerInputRef = ref(null)
+const errorAudioRef = ref(null)
+
+const scannedCode = ref('')
+const currentOrder = ref(null)
+const errorMessage = ref('')
+const successMessage = ref('')
+const isSyncing = ref(false)
+
+// Mantém o foco no input sempre que a página for clicada (útil para o operador)
+onMounted(() => {
+  document.addEventListener('click', () => {
+    scannerInputRef.value?.focus()
+  })
+})
+
+const playErrorSound = () => {
+  if (errorAudioRef.value) {
+    errorAudioRef.value.currentTime = 0
+    errorAudioRef.value.play()
+  }
+}
+
+const syncOrders = async () => {
+  isSyncing.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const res = await $fetch('/api/baselinker', { method: 'POST' })
+    successMessage.value = res.message
+  } catch (error) {
+    errorMessage.value = 'Erro ao sincronizar dados.'
+    playErrorSound()
+  } finally {
+    isSyncing.value = false
+    scannerInputRef.value?.focus()
+  }
+}
+
+const handleScan = async () => {
+  const code = scannedCode.value.trim()
+  scannedCode.value = '' // Limpa o input rapidamente
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  if (!code) return
+
+  // CENÁRIO 1: Procurando um pedido (Bipando Rastreio)
+  if (!currentOrder.value) {
+    try {
+      const response = await $fetch('/api/scan', {
+        method: 'POST',
+        body: { trackingCode: code }
+      })
+      
+      // Adiciona flag visual de 'checked'
+      const orderData = response.order
+      orderData.products = orderData.products.map(p => ({ ...p, checked: false }))
+      
+      currentOrder.value = orderData
+      successMessage.value = 'Pedido encontrado! Bipe os produtos.'
+    } catch (error) {
+      playErrorSound()
+      errorMessage.value = error.data?.statusMessage || 'Etiqueta não encontrada no banco local.'
+    }
+  } 
+  // CENÁRIO 2: Conferindo Produto (Bipando EAN)
+  else {
+    let productFound = false
+    let allChecked = true
+
+    for (const product of currentOrder.value.products) {
+      if (product.ean === code && !product.checked) {
+        product.checked = true
+        productFound = true
+        successMessage.value = 'Produto conferido com sucesso!'
+        break // Sai do loop para marcar 1 quantidade por vez
+      }
+    }
+
+    if (!productFound) {
+      playErrorSound()
+      errorMessage.value = 'EAN não pertence a este pedido ou já foi conferido!'
+      return
+    }
+
+    // Verifica se a caixa toda foi conferida
+    currentOrder.value.products.forEach(p => {
+      if (!p.checked) allChecked = false
+    })
+
+    if (allChecked) {
+      successMessage.value = 'PEDIDO 100% CONFERIDO! Fechando caixa...'
+      // Timeout curto para o operador ver a mensagem de sucesso antes de resetar
+      setTimeout(() => {
+        resetConference()
+      }, 2000)
+    }
+  }
+}
+
+const resetConference = () => {
+  currentOrder.value = null
+  scannedCode.value = ''
+  errorMessage.value = ''
+  successMessage.value = ''
+  scannerInputRef.value?.focus()
+}
+</script>

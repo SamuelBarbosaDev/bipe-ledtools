@@ -1,0 +1,32 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Order {
+  id                Int       @id // order_id do Baselinker
+  externalOrderId   String?
+  deliveryPackageNr String?   // Código de Rastreio da Etiqueta
+  status            String
+  dateConfirmed     Int
+  products          Product[]
+
+  // Índice essencial para a busca ser extremamente rápida
+  @@index([deliveryPackageNr])
+}
+
+model Product {
+  id        String  @id @default(uuid())
+  orderId   Int
+  ean       String? // Pode vir nulo do Baselinker se não houver no anúncio
+  sku       String?
+  name      String
+  quantity  Int
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
